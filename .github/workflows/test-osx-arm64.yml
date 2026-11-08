@@ -1,0 +1,87 @@
+name: Test opensees osx-arm64 build
+
+on:
+  workflow_dispatch:
+    inputs:
+      azure_build_id:
+        description: "Azure Pipelines buildId of the conda-forge opensees-feedstock PR build"
+        required: true
+      python:
+        description: "Python version to test"
+        default: "3.12"
+      hdf5:
+        description: "hdf5 variant in the CI config name (2 or 1.14.6)"
+        default: "2"
+
+jobs:
+  test:
+    runs-on: macos-14  # Apple Silicon (arm64)
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download osx-arm64 package from Azure Pipelines
+        env:
+          BUILD_ID: ${{ inputs.azure_build_id }}
+          PY: ${{ inputs.python }}
+          HDF5: ${{ inputs.hdf5 }}
+        run: |
+          set -euo pipefail
+          API="https://dev.azure.com/conda-forge/84710dde-1620-425b-80d0-4cf5baca359d/_apis/build/builds/${BUILD_ID}/artifacts?api-version=7.1"
+          curl -fsSL "$API" -o artifacts.json
+          # e.g. opensees-feedstock_conda_pkgs_<run>_osx_arm64_hdf52python3.12.____cpython.tar.zst
+          PATTERN="conda_pkgs_.*_osx_arm64_hdf5${HDF5}python${PY}\."
+          URL=$(python3 - "$PATTERN" <<'EOF'
+          import json, re, sys
+          pat = re.compile(sys.argv[1])
+          arts = json.load(open("artifacts.json"))["value"]
+          hits = [a for a in arts if pat.search(a["name"])]
+          if len(hits) != 1:
+              sys.exit("expected exactly one artifact, got: %s" % [a["name"] for a in arts])
+          print(hits[0]["name"], file=sys.stderr)
+          print(hits[0]["resource"]["downloadUrl"])
+          EOF
+          )
+          curl -fsSL "$URL" -o artifact.zip
+          mkdir -p dl
+          unzip -q artifact.zip -d dl
+          find dl -type f
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: test
+          create-args: >-
+            python=${{ inputs.python }}
+            conda-index
+            zstd
+          condarc: |
+            channels:
+              - conda-forge
+
+      - name: Install opensees from the local channel
+        run: |
+          set -euo pipefail
+          mkdir -p channel
+          zstd -dc "$(find dl -name '*.tar.zst' | head -1)" | tar -x -C channel
+          find channel -name 'opensees-*.conda' -print
+          python -m conda_index "$PWD/channel"
+          micromamba install -y -n test \
+            -c "file://$PWD/channel" -c conda-forge \
+            "opensees=3.8.0" "python=${{ inputs.python }}"
+          micromamba list -n test | grep -E "opensees|python |hdf5|openmpi|libgfortran"
+
+      - name: Check binaries are arm64
+        run: |
+          set -euo pipefail
+          SO=$(python -c "import importlib.util; print(importlib.util.find_spec('opensees').origin)")
+          file "$SO" "$CONDA_PREFIX/bin/OpenSees"
+          file "$SO" | grep -q arm64
+          file "$CONDA_PREFIX/bin/OpenSees" | grep -q arm64
+
+      - name: Python cantilever test
+        run: python tests/cantilever.py
+
+      - name: Tcl cantilever test
+        run: OpenSees tests/cantilever.tcl
