@@ -5,7 +5,7 @@ Smoke tests for the osx-arm64 (Apple Silicon) build of the conda-forge
 
 The osx-arm64 package is cross-compiled on osx-64 in conda-forge CI, so its
 recipe tests are skipped there. This repository runs them on a native Apple
-Silicon GitHub Actions runner (`macos-14`).
+Silicon GitHub Actions runner (`macos-15`).
 
 ## Usage
 
