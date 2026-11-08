@@ -64,7 +64,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p channel
-          zstd -dc "$(find dl -name '*.tar.zst' | head -1)" | tar -x -C channel
+          # The zip contains a directory named *.tar.zst holding the archive file
+          zstd -dc "$(find dl -type f -name '*.tar.zst' | head -1)" | tar -x -C channel
           find channel -name 'opensees-*.conda' -print
           python -m conda_index "$PWD/channel"
           micromamba install -y -n test \
